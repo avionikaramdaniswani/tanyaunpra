@@ -28,9 +28,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, MessageSquare, AlertTriangle, CheckCircle, Search, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { Loader2, MessageSquare, AlertTriangle, CheckCircle, Search, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Trash2, CheckSquare, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+type ListSessionsCache = {
+  sessions: Array<{ id: string }>;
+  pagination?: { total: number; page: number; limit: number; totalPages: number };
+} | undefined;
 
 export default function ChatLogs() {
   const [page, setPage] = useState(1);
@@ -42,6 +48,9 @@ export default function ChatLogs() {
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupDays, setCleanupDays] = useState<string>("30");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkOpen, setConfirmBulkOpen] = useState(false);
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -57,18 +66,48 @@ export default function ChatLogs() {
   };
   const { data: sessionsData, isLoading, isError } = useListChatSessions(sessionsQueryParams);
 
-  const invalidateChatLists = () => {
+  const removeSessionsFromCache = (ids: string[]) => {
+    const idSet = new Set(ids);
+    queryClient.setQueriesData<ListSessionsCache>({ queryKey: ["listChatSessions"] }, (old) => {
+      if (!old) return old;
+      const filtered = old.sessions.filter((s) => !idSet.has(s.id));
+      const removed = old.sessions.length - filtered.length;
+      return {
+        ...old,
+        sessions: filtered,
+        pagination: old.pagination
+          ? {
+              ...old.pagination,
+              total: Math.max(0, old.pagination.total - removed),
+              totalPages: Math.max(
+                1,
+                Math.ceil(Math.max(0, old.pagination.total - removed) / old.pagination.limit),
+              ),
+            }
+          : old.pagination,
+      };
+    });
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
+  };
+
+  const refetchInBackground = () => {
     queryClient.invalidateQueries({ queryKey: ["listChatSessions"] });
     queryClient.invalidateQueries({ queryKey: getGetChatStatsQueryKey() });
   };
 
   const deleteSessionMutation = useDeleteChatSession({
     mutation: {
-      onSuccess: () => {
-        invalidateChatLists();
+      onSuccess: (_data, variables) => {
+        const id = variables.id;
+        removeSessionsFromCache([id]);
+        refetchInBackground();
         toast({ title: "Sesi dihapus", description: "Sesi chat dan semua pesannya berhasil dihapus." });
         setDeleteSessionId(null);
-        if (selectedSessionId === deleteSessionId) setSelectedSessionId(null);
+        if (selectedSessionId === id) setSelectedSessionId(null);
       },
       onError: () => {
         toast({ title: "Gagal menghapus", description: "Tidak bisa menghapus sesi. Coba lagi.", variant: "destructive" });
@@ -78,19 +117,62 @@ export default function ChatLogs() {
 
   const bulkDeleteMutation = useBulkDeleteChatSessions({
     mutation: {
-      onSuccess: (data) => {
-        invalidateChatLists();
+      onSuccess: (data, variables) => {
+        const idsSent = variables.data?.ids;
+        if (idsSent && idsSent.length > 0) {
+          removeSessionsFromCache(idsSent);
+        } else {
+          // cleanup-by-age — server figured out which rows; safer to just refetch
+          queryClient.invalidateQueries({ queryKey: ["listChatSessions"] });
+        }
+        queryClient.invalidateQueries({ queryKey: getGetChatStatsQueryKey() });
+        if (!idsSent || idsSent.length === 0) refetchInBackground();
         toast({
-          title: "Cleanup selesai",
-          description: `${data.deletedCount} sesi chat lama berhasil dihapus.`,
+          title: idsSent ? "Sesi terpilih dihapus" : "Cleanup selesai",
+          description: `${data.deletedCount} sesi chat berhasil dihapus.`,
         });
         setCleanupOpen(false);
+        setConfirmBulkOpen(false);
+        if (idsSent && idsSent.length > 0) {
+          setSelectMode(false);
+        }
       },
       onError: () => {
-        toast({ title: "Gagal cleanup", description: "Tidak bisa menjalankan cleanup. Coba lagi.", variant: "destructive" });
+        toast({ title: "Gagal menghapus", description: "Tidak bisa menghapus sesi. Coba lagi.", variant: "destructive" });
       },
     },
   });
+
+  const visibleSessions = sessionsData?.sessions ?? [];
+  const allVisibleIds = visibleSessions.map((s) => s.id);
+  const allVisibleSelected = allVisibleIds.length > 0 && allVisibleIds.every((id) => selectedIds.has(id));
+  const someVisibleSelected = allVisibleIds.some((id) => selectedIds.has(id));
+
+  const toggleSelectAllVisible = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const id of allVisibleIds) next.delete(id);
+      } else {
+        for (const id of allVisibleIds) next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
 
   return (
     <div className="space-y-6">
@@ -99,10 +181,39 @@ export default function ChatLogs() {
           <h1 className="text-3xl font-bold tracking-tight">Chat Logs</h1>
           <p className="text-muted-foreground">Monitor and review AI interactions from the mobile app.</p>
         </div>
-        <Button variant="outline" onClick={() => setCleanupOpen(true)} data-testid="button-cleanup-sessions">
-          <Trash2 className="h-4 w-4 mr-2" />
-          Hapus Sesi Lama
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {selectMode ? (
+            <>
+              <span className="text-sm text-muted-foreground">
+                {selectedIds.size} sesi terpilih
+              </span>
+              <Button
+                variant="destructive"
+                disabled={selectedIds.size === 0 || bulkDeleteMutation.isPending}
+                onClick={() => setConfirmBulkOpen(true)}
+                data-testid="button-bulk-delete-selected"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Hapus Terpilih
+              </Button>
+              <Button variant="ghost" onClick={exitSelectMode} data-testid="button-exit-select-mode">
+                <X className="h-4 w-4 mr-2" />
+                Batal
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => setSelectMode(true)} data-testid="button-enter-select-mode">
+                <CheckSquare className="h-4 w-4 mr-2" />
+                Mode Pilih
+              </Button>
+              <Button variant="outline" onClick={() => setCleanupOpen(true)} data-testid="button-cleanup-sessions">
+                <Trash2 className="h-4 w-4 mr-2" />
+                Hapus Sesi Lama
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -195,6 +306,16 @@ export default function ChatLogs() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  {selectMode && (
+                    <TableHead className="w-10">
+                      <Checkbox
+                        checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
+                        onCheckedChange={toggleSelectAllVisible}
+                        aria-label="Pilih semua di halaman ini"
+                        data-testid="checkbox-select-all"
+                      />
+                    </TableHead>
+                  )}
                   <TableHead>Time</TableHead>
                   <TableHead>Device / User</TableHead>
                   <TableHead>Messages</TableHead>
@@ -205,19 +326,32 @@ export default function ChatLogs() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-24 text-center">
+                    <TableCell colSpan={selectMode ? 6 : 5} className="h-24 text-center">
                       <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
                     </TableCell>
                   </TableRow>
                 ) : sessionsData?.sessions.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={selectMode ? 6 : 5} className="h-24 text-center text-muted-foreground">
                       {flaggedOnly ? "Tidak ada sesi dengan pesan yang perlu review." : "No chat sessions found."}
                     </TableCell>
                   </TableRow>
                 ) : (
                   sessionsData?.sessions.map((session) => (
-                    <TableRow key={session.id} className={session.reviewCount > 0 ? "bg-destructive/5" : ""}>
+                    <TableRow
+                      key={session.id}
+                      className={`${session.reviewCount > 0 ? "bg-destructive/5" : ""} ${selectedIds.has(session.id) ? "bg-primary/5" : ""}`}
+                    >
+                      {selectMode && (
+                        <TableCell className="w-10">
+                          <Checkbox
+                            checked={selectedIds.has(session.id)}
+                            onCheckedChange={() => toggleSelectOne(session.id)}
+                            aria-label="Pilih sesi"
+                            data-testid={`checkbox-session-${session.id}`}
+                          />
+                        </TableCell>
+                      )}
                       <TableCell className="font-medium whitespace-nowrap">
                         {format(new Date(session.lastMessageAt), "dd MMM yyyy, HH:mm")}
                       </TableCell>
@@ -302,6 +436,35 @@ export default function ChatLogs() {
           onDelete={() => setDeleteSessionId(selectedSessionId)}
         />
       )}
+
+      <AlertDialog open={confirmBulkOpen} onOpenChange={(open) => !bulkDeleteMutation.isPending && setConfirmBulkOpen(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus {selectedIds.size} sesi terpilih?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Semua sesi yang kamu pilih beserta seluruh pesannya akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleteMutation.isPending}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={bulkDeleteMutation.isPending || selectedIds.size === 0}
+              onClick={(e) => {
+                e.preventDefault();
+                bulkDeleteMutation.mutate({ data: { ids: Array.from(selectedIds) } });
+              }}
+              data-testid="button-confirm-bulk-delete"
+            >
+              {bulkDeleteMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Menghapus...</>
+              ) : (
+                <>Hapus {selectedIds.size} Sesi</>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!deleteSessionId} onOpenChange={(open) => !open && setDeleteSessionId(null)}>
         <AlertDialogContent>
