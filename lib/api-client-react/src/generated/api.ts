@@ -22,6 +22,8 @@ import type {
   AnnouncementResponse,
   AnnouncementsResponse,
   AuthResponse,
+  BulkDeleteChatSessions200,
+  BulkDeleteChatSessionsBody,
   CalendarEventResponse,
   ChatAskRequest,
   ChatAskResponse,
@@ -48,6 +50,7 @@ import type {
   CreateStudentRequest,
   DashboardActivityResponse,
   DashboardSummaryResponse,
+  DeleteChatSession200,
   DeleteMyChatMessage200,
   DeleteMyChatSession200,
   ErrorResponse,
@@ -2482,6 +2485,180 @@ export function useGetChatSession<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Hapus sesi chat beserta semua pesannya (admin only)
+ */
+export const getDeleteChatSessionUrl = (id: string) => {
+  return `/api/chat/sessions/${id}`;
+};
+
+export const deleteChatSession = async (
+  id: string,
+  options?: RequestInit,
+): Promise<DeleteChatSession200> => {
+  return customFetch<DeleteChatSession200>(getDeleteChatSessionUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteChatSessionMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteChatSession>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteChatSession>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteChatSession"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteChatSession>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteChatSession(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteChatSessionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteChatSession>>
+>;
+
+export type DeleteChatSessionMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Hapus sesi chat beserta semua pesannya (admin only)
+ */
+export const useDeleteChatSession = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteChatSession>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteChatSession>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteChatSessionMutationOptions(options));
+};
+
+/**
+ * @summary Hapus banyak sesi chat sekaligus (admin only). Bisa berdasarkan list ID atau usia (olderThanDays).
+ */
+export const getBulkDeleteChatSessionsUrl = () => {
+  return `/api/chat/sessions/bulk-delete`;
+};
+
+export const bulkDeleteChatSessions = async (
+  bulkDeleteChatSessionsBody: BulkDeleteChatSessionsBody,
+  options?: RequestInit,
+): Promise<BulkDeleteChatSessions200> => {
+  return customFetch<BulkDeleteChatSessions200>(
+    getBulkDeleteChatSessionsUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(bulkDeleteChatSessionsBody),
+    },
+  );
+};
+
+export const getBulkDeleteChatSessionsMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bulkDeleteChatSessions>>,
+    TError,
+    { data: BodyType<BulkDeleteChatSessionsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof bulkDeleteChatSessions>>,
+  TError,
+  { data: BodyType<BulkDeleteChatSessionsBody> },
+  TContext
+> => {
+  const mutationKey = ["bulkDeleteChatSessions"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof bulkDeleteChatSessions>>,
+    { data: BodyType<BulkDeleteChatSessionsBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return bulkDeleteChatSessions(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type BulkDeleteChatSessionsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof bulkDeleteChatSessions>>
+>;
+export type BulkDeleteChatSessionsMutationBody =
+  BodyType<BulkDeleteChatSessionsBody>;
+export type BulkDeleteChatSessionsMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Hapus banyak sesi chat sekaligus (admin only). Bisa berdasarkan list ID atau usia (olderThanDays).
+ */
+export const useBulkDeleteChatSessions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bulkDeleteChatSessions>>,
+    TError,
+    { data: BodyType<BulkDeleteChatSessionsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof bulkDeleteChatSessions>>,
+  TError,
+  { data: BodyType<BulkDeleteChatSessionsBody> },
+  TContext
+> => {
+  return useMutation(getBulkDeleteChatSessionsMutationOptions(options));
+};
 
 /**
  * @summary Tandai pesan untuk review manual (admin only)

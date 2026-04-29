@@ -7,7 +7,7 @@ import {
   usersTable,
   studentsTable,
 } from "@workspace/db";
-import { eq, desc, and, or, gte, lte, sql, count, SQL, ilike } from "drizzle-orm";
+import { eq, desc, and, or, gte, lte, sql, count, SQL, ilike, inArray } from "drizzle-orm";
 import { requireAuth, requireApiKey, requireApiKeyOrAuth } from "../middlewares/auth";
 import { matchIntent } from "../lib/intentMatcher";
 import { askQwen } from "../lib/qwen";
@@ -451,6 +451,53 @@ router.get("/chat/sessions", requireAuth(["admin"]), async (req: Request, res: R
   }
 });
 
+router.post("/chat/sessions/bulk-delete", requireAuth(["admin"]), async (req: Request, res: Response) => {
+  const schema = z
+    .object({
+      ids: z.array(z.string().uuid()).optional(),
+      olderThanDays: z.coerce.number().int().min(1).optional(),
+    })
+    .refine(
+      (v) => (v.ids && v.ids.length > 0) || typeof v.olderThanDays === "number",
+      { message: "Harus menyertakan 'ids' (array) atau 'olderThanDays' (>=1)" },
+    );
+
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Data tidak valid", details: parsed.error.flatten() });
+    return;
+  }
+
+  const { ids, olderThanDays } = parsed.data;
+
+  try {
+    const conditions: SQL[] = [];
+    if (ids && ids.length > 0) {
+      conditions.push(inArray(chatSessionsTable.id, ids));
+    }
+    if (typeof olderThanDays === "number") {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - olderThanDays);
+      conditions.push(lte(chatSessionsTable.lastMessageAt, cutoff));
+    }
+
+    const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
+
+    const result = await db
+      .delete(chatSessionsTable)
+      .where(whereClause!)
+      .returning({ id: chatSessionsTable.id });
+
+    res.json({
+      message: `Berhasil menghapus ${result.length} sesi chat`,
+      deletedCount: result.length,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Bulk delete sessions error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/chat/sessions/:id", requireAuth(["admin"]), async (req: Request, res: Response) => {
   const id = String(req.params.id);
 
@@ -485,6 +532,27 @@ router.get("/chat/sessions/:id", requireAuth(["admin"]), async (req: Request, re
     res.json({ session, messages });
   } catch (err) {
     req.log.error({ err }, "Get session detail error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/chat/sessions/:id", requireAuth(["admin"]), async (req: Request, res: Response) => {
+  const id = String(req.params.id);
+
+  try {
+    const result = await db
+      .delete(chatSessionsTable)
+      .where(eq(chatSessionsTable.id, id))
+      .returning({ id: chatSessionsTable.id });
+
+    if (result.length === 0) {
+      res.status(404).json({ error: "Session tidak ditemukan" });
+      return;
+    }
+
+    res.json({ message: "Sesi chat berhasil dihapus" });
+  } catch (err) {
+    req.log.error({ err }, "Delete session (admin) error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

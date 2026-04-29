@@ -771,6 +771,82 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteChatSession
+      tags: [chat]
+      summary: Hapus sesi chat beserta semua pesannya (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Sesi berhasil dihapus
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                required: [message]
+        "403":
+          description: Akses ditolak
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: Session tidak ditemukan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /chat/sessions/bulk-delete:
+    post:
+      operationId: bulkDeleteChatSessions
+      tags: [chat]
+      summary: Hapus banyak sesi chat sekaligus (admin only). Bisa berdasarkan list ID atau usia (olderThanDays).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items: { type: string }
+                  description: Daftar session ID yang akan dihapus
+                olderThanDays:
+                  type: integer
+                  minimum: 1
+                  description: Hapus semua sesi yang lebih lama dari N hari (berdasarkan lastMessageAt)
+      responses:
+        "200":
+          description: Bulk delete berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  deletedCount: { type: integer }
+                required: [message, deletedCount]
+        "400":
+          description: Parameter tidak valid
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "403":
+          description: Akses ditolak
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 
   /chat/messages/{id}/flag:
     patch:

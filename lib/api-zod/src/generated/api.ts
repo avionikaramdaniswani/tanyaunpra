@@ -639,6 +639,40 @@ export const GetChatSessionResponse = zod.object({
 });
 
 /**
+ * @summary Hapus sesi chat beserta semua pesannya (admin only)
+ */
+export const DeleteChatSessionParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DeleteChatSessionResponse = zod.object({
+  message: zod.string(),
+});
+
+/**
+ * @summary Hapus banyak sesi chat sekaligus (admin only). Bisa berdasarkan list ID atau usia (olderThanDays).
+ */
+
+export const BulkDeleteChatSessionsBody = zod.object({
+  ids: zod
+    .array(zod.string())
+    .optional()
+    .describe("Daftar session ID yang akan dihapus"),
+  olderThanDays: zod
+    .number()
+    .min(1)
+    .optional()
+    .describe(
+      "Hapus semua sesi yang lebih lama dari N hari (berdasarkan lastMessageAt)",
+    ),
+});
+
+export const BulkDeleteChatSessionsResponse = zod.object({
+  message: zod.string(),
+  deletedCount: zod.number(),
+});
+
+/**
  * @summary Tandai pesan untuk review manual (admin only)
  */
 export const FlagChatMessageParams = zod.object({

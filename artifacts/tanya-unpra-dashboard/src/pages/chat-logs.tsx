@@ -1,15 +1,35 @@
 import { useState } from "react";
 import { format } from "date-fns";
-import { useListChatSessions, useGetChatSession, useGetChatStats, useFlagChatMessage, getListChatSessionsQueryKey, getGetChatSessionQueryKey, getGetChatStatsQueryKey } from "@workspace/api-client-react";
+import {
+  useListChatSessions,
+  useGetChatSession,
+  useGetChatStats,
+  useFlagChatMessage,
+  useDeleteChatSession,
+  useBulkDeleteChatSessions,
+  getListChatSessionsQueryKey,
+  getGetChatSessionQueryKey,
+  getGetChatStatsQueryKey,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, MessageSquare, AlertTriangle, CheckCircle, Search, Calendar as CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, MessageSquare, AlertTriangle, CheckCircle, Search, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function ChatLogs() {
@@ -19,14 +39,57 @@ export default function ChatLogs() {
   const [userSearch, setUserSearch] = useState<string>("");
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  
+  const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [cleanupDays, setCleanupDays] = useState<string>("30");
+
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
   const { data: stats } = useGetChatStats();
-  const { data: sessionsData, isLoading, isError } = useListChatSessions({
-    page, limit: 10,
+  const sessionsQueryParams = {
+    page,
+    limit: 10,
     date: date || undefined,
     search: search || undefined,
     userSearch: userSearch || undefined,
     needsReview: flaggedOnly || undefined,
+  };
+  const { data: sessionsData, isLoading, isError } = useListChatSessions(sessionsQueryParams);
+
+  const invalidateChatLists = () => {
+    queryClient.invalidateQueries({ queryKey: ["listChatSessions"] });
+    queryClient.invalidateQueries({ queryKey: getGetChatStatsQueryKey() });
+  };
+
+  const deleteSessionMutation = useDeleteChatSession({
+    mutation: {
+      onSuccess: () => {
+        invalidateChatLists();
+        toast({ title: "Sesi dihapus", description: "Sesi chat dan semua pesannya berhasil dihapus." });
+        setDeleteSessionId(null);
+        if (selectedSessionId === deleteSessionId) setSelectedSessionId(null);
+      },
+      onError: () => {
+        toast({ title: "Gagal menghapus", description: "Tidak bisa menghapus sesi. Coba lagi.", variant: "destructive" });
+      },
+    },
+  });
+
+  const bulkDeleteMutation = useBulkDeleteChatSessions({
+    mutation: {
+      onSuccess: (data) => {
+        invalidateChatLists();
+        toast({
+          title: "Cleanup selesai",
+          description: `${data.deletedCount} sesi chat lama berhasil dihapus.`,
+        });
+        setCleanupOpen(false);
+      },
+      onError: () => {
+        toast({ title: "Gagal cleanup", description: "Tidak bisa menjalankan cleanup. Coba lagi.", variant: "destructive" });
+      },
+    },
   });
 
   return (
@@ -36,6 +99,10 @@ export default function ChatLogs() {
           <h1 className="text-3xl font-bold tracking-tight">Chat Logs</h1>
           <p className="text-muted-foreground">Monitor and review AI interactions from the mobile app.</p>
         </div>
+        <Button variant="outline" onClick={() => setCleanupOpen(true)} data-testid="button-cleanup-sessions">
+          <Trash2 className="h-4 w-4 mr-2" />
+          Hapus Sesi Lama
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -177,9 +244,21 @@ export default function ChatLogs() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Button variant="outline" size="sm" onClick={() => setSelectedSessionId(session.id)}>
-                          View Details
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => setSelectedSessionId(session.id)}>
+                            View Details
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setDeleteSessionId(session.id)}
+                            title="Hapus sesi chat ini"
+                            data-testid={`button-delete-session-${session.id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
@@ -220,13 +299,86 @@ export default function ChatLogs() {
         <ChatSessionDetailModal
           sessionId={selectedSessionId}
           onClose={() => setSelectedSessionId(null)}
+          onDelete={() => setDeleteSessionId(selectedSessionId)}
         />
       )}
+
+      <AlertDialog open={!!deleteSessionId} onOpenChange={(open) => !open && setDeleteSessionId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus sesi chat?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Sesi ini beserta semua pesannya akan dihapus permanen dari database. Tindakan ini tidak dapat dibatalkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteSessionMutation.isPending}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteSessionMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (deleteSessionId) {
+                  deleteSessionMutation.mutate({ id: deleteSessionId });
+                }
+              }}
+              data-testid="button-confirm-delete-session"
+            >
+              {deleteSessionMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Menghapus...</>
+              ) : (
+                "Hapus"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={cleanupOpen} onOpenChange={(open) => !bulkDeleteMutation.isPending && setCleanupOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Hapus Sesi Chat Lama</DialogTitle>
+            <DialogDescription>
+              Hapus semua sesi chat yang pesan terakhirnya lebih lama dari jumlah hari di bawah ini. Berguna untuk mengurangi ukuran database.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <label className="text-sm font-medium">Lebih lama dari (hari)</label>
+            <Input
+              type="number"
+              min={1}
+              value={cleanupDays}
+              onChange={(e) => setCleanupDays(e.target.value)}
+              data-testid="input-cleanup-days"
+            />
+            <p className="text-xs text-muted-foreground">
+              Contoh: <strong>30</strong> akan menghapus sesi yang tidak aktif lebih dari 30 hari terakhir.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCleanupOpen(false)} disabled={bulkDeleteMutation.isPending}>
+              Batal
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={bulkDeleteMutation.isPending || !cleanupDays || Number(cleanupDays) < 1}
+              onClick={() => bulkDeleteMutation.mutate({ data: { olderThanDays: Number(cleanupDays) } })}
+              data-testid="button-confirm-cleanup"
+            >
+              {bulkDeleteMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Menghapus...</>
+              ) : (
+                <><Trash2 className="h-4 w-4 mr-2" /> Hapus Sekarang</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function ChatSessionDetailModal({ sessionId, onClose }: { sessionId: string, onClose: () => void }) {
+function ChatSessionDetailModal({ sessionId, onClose, onDelete }: { sessionId: string, onClose: () => void, onDelete?: () => void }) {
   const { data, isLoading } = useGetChatSession(sessionId, { query: { enabled: !!sessionId, queryKey: getGetChatSessionQueryKey(sessionId) } });
   const flagMessage = useFlagChatMessage();
   const queryClient = useQueryClient();
@@ -252,10 +404,26 @@ function ChatSessionDetailModal({ sessionId, onClose }: { sessionId: string, onC
     <Dialog open={!!sessionId} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Chat Session Details</DialogTitle>
-          <DialogDescription>
-            {data ? `Started ${format(new Date(data.session.createdAt), "PPpp")}` : "Loading..."}
-          </DialogDescription>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <DialogTitle>Chat Session Details</DialogTitle>
+              <DialogDescription>
+                {data ? `Started ${format(new Date(data.session.createdAt), "PPpp")}` : "Loading..."}
+              </DialogDescription>
+            </div>
+            {onDelete && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+                onClick={onDelete}
+                data-testid="button-delete-session-from-modal"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Hapus Sesi
+              </Button>
+            )}
+          </div>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto pr-4 space-y-4 mt-4">

@@ -1321,6 +1321,25 @@ export type ListChatSessionsParams = {
   needsReview?: boolean;
 };
 
+export type DeleteChatSession200 = {
+  message: string;
+};
+
+export type BulkDeleteChatSessionsBody = {
+  /** Daftar session ID yang akan dihapus */
+  ids?: string[];
+  /**
+   * Hapus semua sesi yang lebih lama dari N hari (berdasarkan lastMessageAt)
+   * @minimum 1
+   */
+  olderThanDays?: number;
+};
+
+export type BulkDeleteChatSessions200 = {
+  message: string;
+  deletedCount: number;
+};
+
 export type FlagChatMessageBody = {
   needsReview: boolean;
 };
